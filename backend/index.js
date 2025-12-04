@@ -8,6 +8,7 @@ import { NilDBStorage } from './services/nildb-storage.js';
 import { NilAIService } from './services/nilai-service.js';
 import { ZcashIngestor } from './services/ingestion.js';
 import { cofheService } from './services/cofhe-service.js';
+import { PrivacyAnalyzer } from './services/privacy-analyzer.js';
 
 // Load environment variables
 dotenv.config();
@@ -30,6 +31,13 @@ const logger = pino(
 const nildbStorage = new NilDBStorage();
 const nilaiService = new NilAIService();
 const ingestor = new ZcashIngestor();
+const cofheClient = cofheService; // Use existing cofhe service instance
+const privacyAnalyzer = new PrivacyAnalyzer(
+  ingestor,
+  cofheClient,
+  nildbStorage,
+  nilaiService
+);
 
 // Initialize app
 const app = express();
@@ -124,6 +132,88 @@ app.get('/api/summary', async (req, res) => {
   } catch (error) {
     logger.error({ error: error.message }, 'Failed to generate summary');
     res.status(500).json({ error: 'Failed to generate summary' });
+  }
+});
+
+// Privacy Mode Analysis - Initiate async analysis
+// Flow: User clicks "Analyze" → Backend ingests blocks → Encrypts with CoFHE → Returns ctHash immediately
+app.post('/api/privacy/analyze', async (req, res) => {
+  try {
+    const { blockStart, blockEnd, encryptedItem } = req.body;
+
+    // Validate inputs
+    if (!blockStart || !blockEnd) {
+      return res.status(400).json({ error: 'blockStart and blockEnd required' });
+    }
+
+    if (!encryptedItem || !encryptedItem.ctHash) {
+      return res.status(400).json({ error: 'encryptedItem with ctHash required' });
+    }
+
+    if (blockEnd <= blockStart) {
+      return res.status(400).json({ error: 'blockEnd must be greater than blockStart' });
+    }
+
+    logger.info({ blockStart, blockEnd, ctHash: encryptedItem.ctHash }, 'Received privacy analysis request');
+
+    // Execute privacy analysis pipeline asynchronously
+    // Don't await - return ctHash immediately, let backend process in background
+    privacyAnalyzer.executeAnalysis({
+      blockStart,
+      blockEnd,
+      encryptedItem,
+    }).catch(error => {
+      logger.error({ ctHash: encryptedItem.ctHash, error: error.message }, 'Background analysis failed');
+    });
+
+    // Return ctHash immediately for frontend polling
+    res.json({
+      ctHash: encryptedItem.ctHash,
+      status: 'processing',
+      message: 'Privacy analysis initiated. Use ctHash to poll results.',
+      estimatedTime: '30-60 seconds',
+    });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Failed to initiate privacy analysis');
+    res.status(500).json({ error: 'Failed to initiate privacy analysis' });
+  }
+});
+
+// Retrieve privacy analysis results by ctHash
+// Frontend polls this endpoint to check analysis completion
+app.get('/api/privacy/result/:ctHash', async (req, res) => {
+  try {
+    const { ctHash } = req.params;
+
+    if (!ctHash) {
+      return res.status(400).json({ error: 'ctHash required' });
+    }
+
+    logger.debug({ ctHash }, 'Retrieving privacy analysis result');
+
+    // Retrieve result from cache/nilDB
+    const result = await privacyAnalyzer.getResult(ctHash);
+
+    if (!result) {
+      return res.status(202).json({
+        status: 'processing',
+        ctHash,
+        message: 'Analysis still in progress',
+      });
+    }
+
+    // Return completed analysis
+    res.json({
+      status: 'completed',
+      ctHash,
+      summary: result.summary,
+      aggregates: result.aggregates,
+      metadata: result.metadata,
+      processedAt: result.metadata.processed_at,
+    });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Failed to retrieve result');
+    res.status(500).json({ error: 'Failed to retrieve result' });
   }
 });
 

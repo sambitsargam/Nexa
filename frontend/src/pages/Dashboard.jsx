@@ -12,6 +12,11 @@ export default function Dashboard({ onBack }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [historicalData, setHistoricalData] = useState([]);
+  const [privacyAnalyzing, setPrivacyAnalyzing] = useState(false);
+  const [privacyResult, setPrivacyResult] = useState(null);
+  const [privacyCtHash, setPrivacyCtHash] = useState(null);
+  const [blockStart, setBlockStart] = useState(2000000);
+  const [blockEnd, setBlockEnd] = useState(2000100);
 
   // Fetch real API data
   useEffect(() => {
@@ -71,6 +76,74 @@ export default function Dashboard({ onBack }) {
       console.error('Error fetching privacy data:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Privacy Mode Analysis Functions
+  const startPrivacyAnalysis = async () => {
+    setPrivacyAnalyzing(true);
+    setError(null);
+    try {
+      // Create mock encrypted item (in production: Cofhejs encryption)
+      const encryptedItem = {
+        ctHash: '0x' + Math.random().toString(16).slice(2, 66),
+        signature: '0x' + Math.random().toString(16).slice(2, 130),
+        utype: 'uint256',
+      };
+
+      logger.info('Starting privacy analysis', { blockStart, blockEnd, ctHash: encryptedItem.ctHash });
+
+      // Submit analysis request
+      const response = await fetch(`${API_BASE}/privacy/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          blockStart: parseInt(blockStart),
+          blockEnd: parseInt(blockEnd),
+          encryptedItem,
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to start privacy analysis');
+
+      const data = await response.json();
+      setPrivacyCtHash(data.ctHash);
+
+      // Start polling for results
+      pollPrivacyResult(data.ctHash);
+    } catch (err) {
+      setError(err.message);
+      console.error('Error starting privacy analysis:', err);
+      setPrivacyAnalyzing(false);
+    }
+  };
+
+  // Poll backend for analysis completion
+  const pollPrivacyResult = async (ctHash, attempts = 0) => {
+    const maxAttempts = 120; // 2 minutes max
+
+    try {
+      const response = await fetch(`${API_BASE}/privacy/result/${ctHash}`);
+      const data = await response.json();
+
+      if (data.status === 'completed') {
+        setPrivacyResult(data);
+        setPrivacyAnalyzing(false);
+        logger.info('Privacy analysis completed');
+        return;
+      }
+
+      if (attempts < maxAttempts) {
+        setTimeout(() => pollPrivacyResult(ctHash, attempts + 1), 1000);
+      } else {
+        setError('Privacy analysis timed out');
+        setPrivacyAnalyzing(false);
+      }
+    } catch (err) {
+      logger.error('Error polling privacy result:', err);
+      if (attempts < maxAttempts) {
+        setTimeout(() => pollPrivacyResult(ctHash, attempts + 1), 2000);
+      }
     }
   };
 
@@ -291,28 +364,169 @@ export default function Dashboard({ onBack }) {
           </div>
         )}
 
-        {mode === 'privacy' && privacyData && (
+        {mode === 'privacy' && (
           <div className="privacy-mode">
-            <h1>Privacy-Preserving Analytics</h1>
-            <div className="privacy-status">
-              <div className="status-icon">🔐</div>
-              <h2>End-to-End Encrypted</h2>
-              <p>All data encrypted with homomorphic encryption. Zero data exposure.</p>
-            </div>
-            <div className="privacy-details">
-              <div className="detail-item">
-                <span className="detail-label">ctHash ID:</span>
-                <span className="detail-value">{privacyData.ct_hash?.slice(0, 10)}...</span>
+            <h1>🔐 Privacy-Preserving Analysis</h1>
+            
+            {/* Analysis Controls */}
+            <div className="privacy-controls">
+              <div className="control-group">
+                <label>Block Range Analysis</label>
+                <div className="input-row">
+                  <input
+                    type="number"
+                    placeholder="Start Block"
+                    value={blockStart}
+                    onChange={(e) => setBlockStart(e.target.value)}
+                    disabled={privacyAnalyzing}
+                  />
+                  <span className="input-separator">to</span>
+                  <input
+                    type="number"
+                    placeholder="End Block"
+                    value={blockEnd}
+                    onChange={(e) => setBlockEnd(e.target.value)}
+                    disabled={privacyAnalyzing}
+                  />
+                </div>
               </div>
-              <div className="detail-item">
-                <span className="detail-label">Status:</span>
-                <span className="detail-value status-badge-privacy">Completed</span>
+
+              <button
+                className="btn-analyze"
+                onClick={startPrivacyAnalysis}
+                disabled={privacyAnalyzing || !blockStart || !blockEnd}
+              >
+                {privacyAnalyzing ? (
+                  <>
+                    <span className="spinner">⟳</span> Analyzing...
+                  </>
+                ) : (
+                  '🔐 Analyze Privately'
+                )}
+              </button>
+            </div>
+
+            {/* Loading State */}
+            {privacyAnalyzing && (
+              <div className="privacy-loading">
+                <div className="loading-spinner"></div>
+                <h3>Privacy Analysis In Progress</h3>
+                <p>
+                  Ingesting blocks • Preprocessing vectors • Encrypting with CoFHE •
+                  Computing on encrypted data • Generating summary
+                </p>
+                <div className="progress-bar">
+                  <div className="progress-fill"></div>
+                </div>
+                {privacyCtHash && (
+                  <p className="ct-hash-display">
+                    <strong>ctHash:</strong> {privacyCtHash.slice(0, 16)}...
+                  </p>
+                )}
               </div>
-            </div>
-            <div className="summary-card privacy">
-              <h2>Encrypted Summary</h2>
-              <p>Privacy-preserved analysis complete. All computations performed on encrypted data with zero intermediate exposure. Results verified through on-chain proofs.</p>
-            </div>
+            )}
+
+            {/* Analysis Results */}
+            {privacyResult && !privacyAnalyzing && (
+              <div className="privacy-result">
+                <div className="result-status">
+                  <div className="status-icon">✅</div>
+                  <h2>Analysis Complete</h2>
+                  <p>Privacy-preserved insights generated</p>
+                </div>
+
+                {/* AI Summary */}
+                {privacyResult.summary && (
+                  <div className="privacy-ai-summary">
+                    <div className="summary-header">
+                      <span className="badge-encrypted">🤖 AI-Generated Insight</span>
+                      <h3>Privacy-Safe Summary</h3>
+                    </div>
+                    <p className="summary-text">{privacyResult.summary}</p>
+                  </div>
+                )}
+
+                {/* Aggregates Display */}
+                {privacyResult.aggregates && (
+                  <div className="privacy-metrics">
+                    <h3>Encrypted Analysis Results</h3>
+                    <div className="metrics-grid">
+                      <div className="metric-card">
+                        <span className="metric-label">Transactions</span>
+                        <span className="metric-value">{privacyResult.aggregates.tx_count}</span>
+                      </div>
+                      <div className="metric-card">
+                        <span className="metric-label">Shielded</span>
+                        <span className="metric-value">
+                          {(privacyResult.aggregates.shielded_ratio * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="metric-card">
+                        <span className="metric-label">Avg Fee</span>
+                        <span className="metric-value">
+                          {(privacyResult.aggregates.avg_fee * 100000).toFixed(2)} μZEC
+                        </span>
+                      </div>
+                      <div className="metric-card">
+                        <span className="metric-label">Fee Variance</span>
+                        <span className="metric-value">
+                          {(privacyResult.aggregates.fee_variance * 1e6).toFixed(2)}e-6
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Metadata */}
+                {privacyResult.metadata && (
+                  <div className="privacy-metadata">
+                    <h3>Analysis Metadata</h3>
+                    <div className="metadata-grid">
+                      <div className="metadata-item">
+                        <span className="label">ctHash:</span>
+                        <span className="value monospace">{privacyCtHash?.slice(0, 20)}...</span>
+                      </div>
+                      <div className="metadata-item">
+                        <span className="label">Block Range:</span>
+                        <span className="value">{blockStart} → {blockEnd}</span>
+                      </div>
+                      <div className="metadata-item">
+                        <span className="label">Transactions Analyzed:</span>
+                        <span className="value">{privacyResult.metadata.txCount}</span>
+                      </div>
+                      <div className="metadata-item">
+                        <span className="label">Processed:</span>
+                        <span className="value">
+                          {new Date(privacyResult.processedAt).toLocaleTimeString()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  className="btn-new-analysis"
+                  onClick={() => {
+                    setPrivacyResult(null);
+                    setPrivacyCtHash(null);
+                  }}
+                >
+                  ↻ Analyze Different Block Range
+                </button>
+              </div>
+            )}
+
+            {/* Default Privacy Status (no analysis yet) */}
+            {!privacyAnalyzing && !privacyResult && (
+              <div className="privacy-status">
+                <div className="status-icon">🔐</div>
+                <h2>Ready for Private Analysis</h2>
+                <p>
+                  All computations performed on encrypted data. Results verified through on-chain proofs.
+                  No intermediate data exposure.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </main>
