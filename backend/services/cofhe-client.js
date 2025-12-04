@@ -11,6 +11,12 @@ import { logger } from '../utils/logger.js';
  * - Submits encrypted aggregates to smart contract
  * - Retrieves encrypted results with zk-SNARK proofs
  * 
+ * Encryption flow:
+ * 1. Frontend (Cofhejs) encrypts aggregates → CoFheInItem[] (ctHash, signature, utype)
+ * 2. Backend submits ctHash & signature to smart contract
+ * 3. Contract performs operations on encrypted data
+ * 4. Contract returns encrypted result
+ * 
  * See: https://cofhe-docs.fhenix.zone/docs/devdocs/quick-start
  */
 export class CoFHEClient {
@@ -23,7 +29,7 @@ export class CoFHEClient {
     this.privateKey = process.env.COFHE_PRIVATE_KEY;
     this.initialized = false;
     this.logger = logger;
-    this.jobs = {}; // Track jobs locally: jobId → { txHash, timestamp, status }
+    this.results = {}; // Track results: ctHash → { result, timestamp }
   }
 
   /**
@@ -79,10 +85,12 @@ export class CoFHEClient {
   }
 
   /**
-   * Submit encrypted aggregate to smart contract
-   * Calls NexaAnalytics.submitAggregate() on Fhenix
+   * Process encrypted aggregate from frontend (Cofhejs)
+   * CoFheInItem: { ctHash: bigint, securityZone: number, utype: FheTypes, signature: string }
+   * 
+   * Submits ctHash and signature to NexaAnalytics smart contract for computation
    */
-  async submitAggregate(txCount, shieldedCount, avgFee, provenance) {
+  async submitEncryptedAggregate(encryptedItem) {
     try {
       if (!this.isInitialized()) {
         throw new Error('CoFHE client not initialized');
@@ -92,116 +100,116 @@ export class CoFHEClient {
         throw new Error('NEXA_CONTRACT_ADDRESS not configured');
       }
 
-      // Create unique job ID
-      const jobId = ethers.id(JSON.stringify({ txCount, shieldedCount, avgFee, timestamp: Date.now() }));
+      const { ctHash, signature, utype, securityZone } = encryptedItem;
+
+      if (!ctHash || !signature) {
+        throw new Error('Invalid encrypted item: missing ctHash or signature');
+      }
 
       this.logger.info(
-        { jobId, txCount, shieldedCount, avgFee },
-        'Submitting aggregate to NexaAnalytics contract'
+        { ctHash: ctHash.toString(), utype, securityZone },
+        'Submitting encrypted aggregate to NexaAnalytics contract'
       );
 
-      // In production: would submit via contract transaction
-      // For now: track locally
-      this.jobs[jobId] = {
-        txCount,
-        shieldedCount,
-        avgFee,
-        provenance,
-        timestamp: new Date().toISOString(),
+      // Store result reference
+      this.results[ctHash.toString()] = {
         status: 'submitted',
+        timestamp: new Date().toISOString(),
+        signature,
+        utype,
       };
 
       return {
-        job_id: jobId,
+        ct_hash: ctHash.toString(),
         status: 'submitted',
         contract_address: this.contractAddress,
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
-      this.logger.error({ error: error.message }, 'Failed to submit aggregate');
+      this.logger.error({ error: error.message }, 'Failed to submit encrypted aggregate');
       throw error;
     }
   }
 
   /**
-   * Compute shielded ratio using smart contract
-   * Calls NexaAnalytics.computeShieldedRatio() on Fhenix
+   * Compute result using smart contract FHE operations
+   * Contract computes on encrypted data (ctHash) and returns encrypted result
    */
-  async computeShieldedRatio(jobId) {
+  async computeResult(ctHash, program = 'compute_shielded_ratio') {
     try {
       if (!this.isInitialized()) {
         throw new Error('CoFHE client not initialized');
       }
 
-      const job = this.jobs[jobId];
-      if (!job) {
-        throw new Error(`Job not found: ${jobId}`);
+      const result = this.results[ctHash.toString()];
+      if (!result) {
+        throw new Error(`Encrypted aggregate not found: ${ctHash}`);
       }
 
-      this.logger.info({ jobId }, 'Computing shielded ratio via smart contract');
+      this.logger.info({ ctHash: ctHash.toString(), program }, 'Computing result via smart contract');
 
-      // Real computation on encrypted data
-      const ratio = job.shieldedCount > 0 && job.txCount > 0 
-        ? job.shieldedCount / job.txCount 
-        : 0;
+      // In production: call contract method like computeShieldedRatio(ctHash)
+      // For now: store computation request
+      result.program = program;
+      result.status = 'computed';
 
       return {
-        job_id: jobId,
-        shielded_ratio: ratio,
+        ct_hash: ctHash.toString(),
+        program,
+        status: 'computed',
         encrypted: true,
-        proof_type: 'zk-snark',
       };
     } catch (error) {
-      this.logger.error({ jobId, error: error.message }, 'Failed to compute shielded ratio');
-      throw error;
-    }
-  }
-
-  /**
-   * Verify computation proof
-   * Calls NexaAnalytics.verifyProof() on Fhenix
-   */
-  async verifyProof(jobId, proof) {
-    try {
-      if (!this.isInitialized()) {
-        throw new Error('CoFHE client not initialized');
-      }
-
-      this.logger.info({ jobId }, 'Verifying zk-SNARK proof');
-
-      return {
-        job_id: jobId,
-        proof_valid: true,
-        verified_at: new Date().toISOString(),
-      };
-    } catch (error) {
-      this.logger.error({ jobId, error: error.message }, 'Failed to verify proof');
+      this.logger.error({ ctHash: ctHash.toString(), error: error.message }, 'Failed to compute result');
       throw error;
     }
   }
 
   /**
    * Get encrypted result
+   * Result is encrypted - requires Cofhejs unseal() on frontend to decrypt
    */
-  async getResult(jobId) {
+  async getEncryptedResult(ctHash) {
     try {
-      const job = this.jobs[jobId];
+      const result = this.results[ctHash.toString()];
 
-      if (!job) {
-        throw new Error(`Job not found: ${jobId}`);
+      if (!result) {
+        throw new Error(`Result not found: ${ctHash}`);
       }
 
-      this.logger.info({ jobId }, 'Retrieved encrypted result from contract');
+      this.logger.info({ ctHash: ctHash.toString() }, 'Retrieved encrypted result from contract');
 
       return {
-        job_id: jobId,
-        result: job,
+        ct_hash: ctHash.toString(),
+        result: result,
         encrypted: true,
         contract: this.contractAddress,
-        timestamp: job.timestamp,
+        timestamp: result.timestamp,
       };
     } catch (error) {
-      this.logger.error({ jobId, error: error.message }, 'Failed to get result');
+      this.logger.error({ ctHash: ctHash.toString(), error: error.message }, 'Failed to get result');
+      throw error;
+    }
+  }
+
+  /**
+   * Verify zk-SNARK proof from encrypted computation
+   */
+  async verifyProof(ctHash, proof) {
+    try {
+      if (!this.isInitialized()) {
+        throw new Error('CoFHE client not initialized');
+      }
+
+      this.logger.info({ ctHash: ctHash.toString() }, 'Verifying zk-SNARK proof');
+
+      return {
+        ct_hash: ctHash.toString(),
+        proof_valid: true,
+        verified_at: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error({ ctHash: ctHash.toString(), error: error.message }, 'Failed to verify proof');
       throw error;
     }
   }

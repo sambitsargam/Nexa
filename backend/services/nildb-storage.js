@@ -103,7 +103,7 @@ export class NilDBStorage {
       const provenance = {
         source_url: metadata.source || 'unknown',
         block_range: metadata.block_range || 'unknown',
-        job_id: metadata.job_id || 'unknown',
+        ct_hash: metadata.ct_hash || referenceId,
         encrypted_at: new Date().toISOString(),
         stored_at: new Date().toISOString(),
         version: 1,
@@ -202,8 +202,8 @@ export class NilDBStorage {
 
       if (this.client && this.collectionId) {
         try {
-          const queryFilter = filters.job_id
-            ? { 'provenance.job_id': filters.job_id }
+          const queryFilter = filters.ct_hash
+            ? { 'provenance.ct_hash': filters.ct_hash }
             : {};
           const records = await this.client.findData(this.collectionId, {
             filter: queryFilter,
@@ -229,9 +229,9 @@ export class NilDBStorage {
         }));
       }
 
-      // Apply job_id filter if needed
-      if (filters.job_id) {
-        results = results.filter((r) => r.metadata?.job_id === filters.job_id);
+      // Apply ct_hash filter if needed
+      if (filters.ct_hash) {
+        results = results.filter((r) => r.metadata?.ct_hash === filters.ct_hash);
       }
 
       logger.info({ count: results.length }, 'Listed encrypted results');

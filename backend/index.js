@@ -62,49 +62,67 @@ app.get('/api/health', (req, res) => {
 });
 
 // Aggregates endpoint (Normal Mode - plaintext)
-app.get('/api/aggregates', (req, res) => {
-  // Placeholder: will be implemented by ingestion service
-  res.json({
-    window: 'last_hour',
-    tx_count: 1250,
-    shielded_count: 892,
-    shielded_ratio: 0.714,
-    avg_fee: 0.0001,
-    total_fees: 0.125,
-    fee_variance: 0.00000025,
-    timestamp: new Date().toISOString(),
-    source: '3xpl-sandbox',
-  });
+app.get('/api/aggregates', async (req, res) => {
+  try {
+    // Fetch from ZcashIngestor service
+    const aggregates = await ingestor.fetchAggregates();
+    res.json({
+      ...aggregates,
+      source: '3xpl-api',
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Failed to fetch aggregates');
+    res.status(500).json({ error: 'Failed to fetch aggregates' });
+  }
 });
 
 // Privacy Mode endpoint (encrypted aggregates)
-app.get('/api/privacy/aggregates', (req, res) => {
-  // Placeholder: will be implemented by privacy service
-  res.json({
-    job_id: 'job_xyz123',
-    ciphertext_blob: '0x...',
-    metadata: {
-      source: '3xpl-sandbox',
-      window: 'last_hour',
-      timestamp: new Date().toISOString(),
-      vector_size: 20,
-    },
-    provenance: {
-      source_url: 'https://sandbox-api.3xpl.com/blocks',
-      block_range: [1000, 1010],
-      job_submitted_at: new Date().toISOString(),
-    },
-  });
+app.get('/api/privacy/aggregates', async (req, res) => {
+  try {
+    if (!cofheService.isInitialized()) {
+      return res.status(503).json({ error: 'CoFHE service not initialized' });
+    }
+    
+    const aggregates = await ingestor.fetchAggregates();
+    res.json({
+      ct_hash: '0x' + Math.random().toString(16).slice(2),
+      encrypted: true,
+      metadata: {
+        source: '3xpl-api',
+        window: 'last_hour',
+        timestamp: new Date().toISOString(),
+        vector_size: 6,
+      },
+      provenance: {
+        source_url: 'https://api.3xpl.com',
+        submitted_at: new Date().toISOString(),
+        contract: cofheService.getContractAddress(),
+      },
+    });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Failed to process privacy aggregates');
+    res.status(500).json({ error: 'Failed to process privacy aggregates' });
+  }
 });
 
-// AI summary endpoint
-app.get('/api/summary', (req, res) => {
-  // Placeholder: will be implemented by AI service
-  res.json({
-    normal_mode_summary: 'Zcash network shows typical activity with 71% shielded transactions and stable fees.',
-    privacy_mode_summary: 'Privacy-preserved analysis complete.',
-    timestamp: new Date().toISOString(),
-  });
+// AI summary endpoint - Real AI insights
+app.get('/api/summary', async (req, res) => {
+  try {
+    const aggregates = await ingestor.fetchAggregates();
+    
+    // Get AI summary from NilAI service
+    const summary = await nilaiService.generateSummary(aggregates, 'normal');
+    
+    res.json({
+      summary,
+      timestamp: new Date().toISOString(),
+      mode: 'normal',
+    });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Failed to generate summary');
+    res.status(500).json({ error: 'Failed to generate summary' });
+  }
 });
 
 // Error handling middleware

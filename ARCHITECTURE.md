@@ -203,18 +203,20 @@ Normal mode: Returns plaintext aggregates
 ```
 
 ### `/api/privacy/aggregates` (POST)
-Privacy mode: Receives encrypted blob from frontend
+Privacy mode: Receives encrypted blob from frontend (Cofhejs CoFheInItem)
 ```json
 {
-  "ciphertext": "0x...",
-  "metadata": { "job_id": "job_xyz", "window": "hour" }
+  "ctHash": "0x123abc...",
+  "signature": "0x...",
+  "utype": "uint32",
+  "metadata": { "window": "hour" }
 }
 ```
 
 Returns:
 ```json
 {
-  "job_id": "job_xyz",
+  "ct_hash": "0x123abc",
   "stored_reference": "ref_abc123",
   "embedding": [0.2, 0.5, ...],
   "encrypted_summary": "0x..."

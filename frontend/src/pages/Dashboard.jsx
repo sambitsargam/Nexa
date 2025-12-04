@@ -274,8 +274,8 @@ export default function Dashboard({ onBack }) {
             </div>
             <div className="privacy-details">
               <div className="detail-item">
-                <span className="detail-label">Job ID:</span>
-                <span className="detail-value">{privacyData.job_id}</span>
+                <span className="detail-label">ctHash ID:</span>
+                <span className="detail-value">{privacyData.ct_hash?.slice(0, 10)}...</span>
               </div>
               <div className="detail-item">
                 <span className="detail-label">Status:</span>

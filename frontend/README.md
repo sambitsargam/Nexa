@@ -90,7 +90,7 @@ The build output will be in the `dist/` directory, ready to deploy.
 ### Privacy Mode Tab
 - Encryption status display
 - Privacy-preserving analytics summary
-- Job details and ciphertext information
+- ctHash details and ciphertext information
 - Encrypted metrics timeline (placeholder)
 - Privacy features checklist
 
@@ -132,7 +132,7 @@ GET http://localhost:3000/api/aggregates
 // Returns plaintext network aggregates
 
 GET http://localhost:3000/api/privacy/aggregates
-// Returns encrypted analytics job
+// Returns encrypted analytics ctHash
 
 GET http://localhost:3000/api/summary
 // Returns AI summary text
