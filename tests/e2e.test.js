@@ -1,5 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert';
+import dotenv from 'dotenv';
+
+// Load environment variables from .env.local
+dotenv.config({ path: new URL('../backend/.env.local', import.meta.url).pathname });
+
 import { ZcashIngestor } from '../backend/services/ingestion.js';
 import { EncryptionPreprocessor } from '../backend/services/preprocessor.js';
 import { CoFHEClient } from '../backend/services/cofhe-client.js';

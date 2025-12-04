@@ -1,266 +1,198 @@
-import axios from 'axios';
-import pino from 'pino';
-import crypto from 'crypto';
-
-const logger = pino();
+import { logger } from '../utils/logger.js';
 
 /**
- * CoFHE (Fhenix) Integration Service
- * Handles homomorphic encryption and off-chain computation
- * NOTE: This is a mock implementation for demo purposes
- *       In production, use official Fhenix SDK from https://cofhe-docs.fhenix.zone
+ * CoFHE Client Service
+ * Manages homomorphic encryption operations for privacy-preserving analytics
+ * 
+ * NOTE: This is a MOCK implementation for development/demo mode.
+ * 
+ * PRODUCTION PATH:
+ * CoFHE is designed to work with Solidity smart contracts on EVM chains.
+ * To use production FHE:
+ * 1. Deploy an FHE-enabled smart contract on Fhenix testnet/mainnet
+ * 2. Use Cofhejs (client-side) to encrypt data before sending to contract
+ * 3. Contract performs operations on encrypted data
+ * 4. Use Cofhejs to unseal results off-chain
+ * 
+ * See: https://cofhe-docs.fhenix.zone/docs/devdocs/quick-start
+ * 
+ * For this backend service (non-contract context), we simulate:
+ * - Encryption via JSON→hex encoding (not real FHE)
+ * - Job tracking with handles
+ * - Mock result computation
  */
 export class CoFHEClient {
-  constructor(options = {}) {
-    this.apiBase = options.apiBase || process.env.COFHE_API_BASE || 'https://api.fhenix.zone';
-    this.apiKey = options.apiKey || process.env.COFHE_API_KEY;
-    this.privateKey = options.privateKey || process.env.COFHE_PRIVATE_KEY;
-    this.jobs = new Map(); // In-memory job storage for demo
-    this.devMode = options.devMode !== false; // Demo mode with simulated encryption
-
-    logger.info('CoFHEClient initialized in ' + (this.devMode ? 'dev/demo mode' : 'production mode'));
+  constructor() {
+    this.devMode = process.env.DEV_MODE === 'true';
+    this.jobs = {}; // Track jobs: jobId → { program, vector, result, timestamp }
+    this.logger = logger;
   }
 
   /**
-   * Generate a mock encrypted vector (in production: uses actual FHE encryption)
-   * For demo: returns a base64 encoded JSON that represents encrypted data
-   */
-  _generateMockCiphertext(vector, jobId) {
-    const payload = {
-      job_id: jobId,
-      vector: vector,
-      timestamp: new Date().toISOString(),
-    };
-    // Simulate ciphertext by encoding JSON as hex string
-    return Buffer.from(JSON.stringify(payload)).toString('hex');
-  }
-
-  /**
-   * Parse mock ciphertext for demo decryption
-   */
-  _parseMockCiphertext(ciphertextHex) {
-    try {
-      const json = Buffer.from(ciphertextHex, 'hex').toString('utf-8');
-      return JSON.parse(json);
-    } catch (error) {
-      logger.error('Failed to parse ciphertext');
-      throw error;
-    }
-  }
-
-  /**
-   * Encrypt a vector using CoFHE
-   * Off-chain FHE: returns ciphertext blob
-   *
-   * @param {array} vector - Fixed-point scaled vector
-   * @returns {object} { ciphertext, job_id, public_key }
+   * Encrypt a vector for FHE computation (dev mode mock)
+   * In production: Use Cofhejs to encrypt before sending to smart contract
    */
   async encryptVector(vector) {
-    if (!Array.isArray(vector) || vector.length === 0) {
-      throw new Error('Vector must be a non-empty array');
-    }
-
     try {
-      const jobId = `job_${crypto.randomBytes(12).toString('hex')}`;
-
-      if (this.devMode) {
-        // Demo: simulate encryption with JSON encoding
-        const ciphertext = this._generateMockCiphertext(vector, jobId);
-        logger.info(`Encrypted vector (demo mode): ${jobId}`);
-        
-        return {
-          ciphertext,
-          job_id: jobId,
-          vector_size: vector.length,
-          encrypted_at: new Date().toISOString(),
-        };
+      if (!this.devMode) {
+        throw new Error(
+          'CoFHE production mode requires Solidity smart contract integration. ' +
+          'Use Cofhejs client library with FHE-enabled contracts on Fhenix testnet.'
+        );
       }
 
-      // Production: call actual CoFHE API
-      // This would use the official Fhenix SDK
-      const response = await axios.post(
-        `${this.apiBase}/encrypt`,
-        {
-          vector,
-          public_key: this.privateKey, // In practice, derive public key from private
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          timeout: 30000,
-        }
-      );
+      // Dev mode: simulate encryption via JSON→hex encoding
+      const ciphertext = Buffer.from(JSON.stringify(vector)).toString('hex');
+      const jobId = `job_${Math.random().toString(36).slice(2, 13)}`;
 
-      logger.info(`Encrypted vector via CoFHE API: ${jobId}`);
-      return response.data;
+      this.jobs[jobId] = {
+        vector,
+        ciphertext,
+        timestamp: new Date().toISOString(),
+        status: 'encrypted',
+      };
+
+      this.logger.info({ jobId, vectorSize: vector.length }, 'Vector encrypted (dev mode)');
+
+      return {
+        job_id: jobId,
+        ciphertext,
+        vector_size: vector.length,
+        timestamp: new Date().toISOString(),
+      };
     } catch (error) {
-      logger.error(`Encryption failed: ${error.message}`);
+      this.logger.error({ error: error.message }, 'Encryption failed');
       throw error;
     }
   }
 
   /**
-   * Submit a homomorphic computation job
-   * Program: e.g., "compute_mean_variance" or "compute_shielded_ratio"
-   *
-   * @param {string} ciphertext - Encrypted vector
-   * @param {string} program - Homomorphic program name
-   * @param {string} jobId - Job identifier
-   * @returns {object} { job_id, program, status, submitted_at }
+   * Submit FHE computation job
+   * In production: Results from smart contract execution
    */
-  async submitJob(ciphertext, program, jobId) {
-    if (!ciphertext || !program || !jobId) {
-      throw new Error('Ciphertext, program, and jobId required');
-    }
-
+  async submitJob(jobId, program, parameters = {}) {
     try {
-      if (this.devMode) {
-        // Demo: simulate job submission
-        const job = {
-          job_id: jobId,
-          program,
-          ciphertext,
-          status: 'submitted',
-          submitted_at: new Date().toISOString(),
-          estimated_completion: new Date(Date.now() + 2000), // Simulate 2s delay
-        };
-        this.jobs.set(jobId, job);
-        logger.info(`Job submitted (demo mode): ${jobId} / ${program}`);
-        return job;
+      if (!this.jobs[jobId]) {
+        throw new Error(`Job not found: ${jobId}`);
       }
 
-      // Production: submit to CoFHE API
-      const response = await axios.post(
-        `${this.apiBase}/jobs`,
-        {
-          ciphertext,
-          program,
-          api_key: this.apiKey,
-        },
-        {
-          timeout: 30000,
-        }
-      );
+      const job = this.jobs[jobId];
 
-      logger.info(`Job submitted to CoFHE: ${jobId}`);
-      return response.data;
+      if (this.devMode) {
+        // Dev mode: simulate instant computation
+        job.program = program;
+        job.parameters = parameters;
+        job.status = 'completed';
+        job.result = this._computeMockResult(program, job.vector, parameters);
+
+        this.logger.info(
+          { jobId, program, vectorSize: job.vector.length },
+          'Job submitted (demo mode)'
+        );
+
+        return {
+          job_id: jobId,
+          program,
+          status: 'submitted',
+          execution_time_ms: 0,
+        };
+      }
+
+      throw new Error('Production FHE requires Solidity contract deployment');
     } catch (error) {
-      logger.error(`Job submission failed: ${error.message}`);
+      this.logger.error({ jobId, error: error.message }, 'Job submission failed');
       throw error;
     }
   }
 
   /**
-   * Retrieve job result
-   * In production: polls CoFHE API until result is ready
-   *
-   * @param {string} jobId - Job identifier
-   * @returns {object} { job_id, program, result, status, completed_at }
+   * Get encryption program result
    */
   async getResult(jobId) {
-    if (!jobId) {
-      throw new Error('JobId required');
-    }
-
     try {
-      if (this.devMode) {
-        // Demo: check in-memory store
-        const job = this.jobs.get(jobId);
-        if (!job) {
-          throw new Error(`Job not found: ${jobId}`);
-        }
+      const job = this.jobs[jobId];
 
-        // Simulate completion
-        if (job.status === 'submitted') {
-          job.status = 'completed';
-          job.completed_at = new Date().toISOString();
-          
-          // Simulate encrypted result (in real scenario, this would be encrypted)
-          job.result = {
-            encrypted: true,
-            mean: this._generateMockCiphertext([42000000], jobId), // Mock encrypted mean
-            variance: this._generateMockCiphertext([1000000], jobId), // Mock encrypted variance
-          };
-        }
-
-        logger.info(`Retrieved job result (demo mode): ${jobId}`);
-        return job;
+      if (!job) {
+        throw new Error(`Job not found: ${jobId}`);
       }
 
-      // Production: poll CoFHE API
-      const response = await axios.get(`${this.apiBase}/jobs/${jobId}`, {
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        timeout: 30000,
-      });
+      if (!job.result) {
+        throw new Error(`Result not ready for job: ${jobId}`);
+      }
 
-      logger.info(`Retrieved job result from CoFHE: ${jobId}`);
-      return response.data;
+      this.logger.info({ jobId }, 'Retrieved job result (demo mode)');
+
+      return {
+        job_id: jobId,
+        result: job.result,
+        encrypted_result: job.ciphertext,
+        timestamp: job.timestamp,
+      };
     } catch (error) {
-      logger.error(`Failed to retrieve job result: ${error.message}`);
+      this.logger.error({ jobId, error: error.message }, 'Failed to get result');
       throw error;
     }
   }
 
   /**
-   * Decrypt a ciphertext result (dev/demo only, not for production)
-   * This should only be called in secure backend context
-   *
-   * @param {string} encryptedResult - Encrypted ciphertext
-   * @returns {object} Decrypted plaintext result
+   * Decrypt result (only in DEV_MODE with ENABLE_DEMO_DECRYPT=true)
+   * In production: Use Cofhejs with permit to unseal on-chain results
    */
-  decryptResult(encryptedResult) {
-    if (!process.env.DEV_MODE || process.env.DEV_MODE !== 'true') {
-      throw new Error('Decryption only available in DEV_MODE');
-    }
-
+  async decryptResult(jobId, ciphertext) {
     try {
-      if (this.devMode) {
-        // Demo: parse mock ciphertext
-        return this._parseMockCiphertext(encryptedResult);
+      if (!process.env.ENABLE_DEMO_DECRYPT || process.env.ENABLE_DEMO_DECRYPT !== 'true') {
+        throw new Error(
+          'Decryption disabled in production. Use Cofhejs with permits to unseal smart contract results. ' +
+          'See: https://cofhe-docs.fhenix.zone/docs/devdocs/cofhejs/sealing-unsealing'
+        );
       }
 
-      // Production: use Fhenix SDK to decrypt with private key
-      logger.warn('Decryption called in production - ensure private key is secure');
-      // const decrypted = fhenixSdk.decrypt(encryptedResult, this.privateKey);
-      // return decrypted;
-      
-      throw new Error('Decryption not implemented for production');
+      if (!ciphertext) {
+        throw new Error('Ciphertext required for decryption');
+      }
+
+      // Dev mode: decode from hex
+      try {
+        const decrypted = JSON.parse(Buffer.from(ciphertext, 'hex').toString());
+        this.logger.info({ jobId }, 'Decrypted result (dev mode only)');
+        return decrypted;
+      } catch (parseError) {
+        this.logger.error({ jobId, error: parseError.message }, 'Failed to parse ciphertext');
+        throw new Error('Invalid ciphertext format');
+      }
     } catch (error) {
-      logger.error(`Decryption failed: ${error.message}`);
+      this.logger.error({ jobId, error: error.message }, 'Decryption failed');
       throw error;
     }
   }
 
   /**
-   * Define homomorphic programs
-   * Returns program code/specification
+   * Compute mock result based on FHE program
    */
-  static definePrograms() {
-    return {
-      compute_mean_variance: {
-        name: 'compute_mean_variance',
-        description: 'Compute mean and variance over encrypted vector',
-        parameters: ['vector', 'count'],
-        outputs: ['mean', 'variance'],
-      },
-      compute_shielded_ratio: {
-        name: 'compute_shielded_ratio',
-        description: 'Compute shielded_count / tx_count ratio',
-        parameters: ['tx_count', 'shielded_count'],
-        outputs: ['ratio'],
-      },
-      compute_fee_statistics: {
-        name: 'compute_fee_statistics',
-        description: 'Compute mean, variance, and percentiles of fees',
-        parameters: ['fee_vector'],
-        outputs: ['mean', 'variance', 'p25', 'p50', 'p75'],
-      },
-    };
+  _computeMockResult(program, vector, parameters) {
+    const [tx, shield, fee, feeSq, ...buckets] = vector;
+
+    switch (program) {
+      case 'compute_mean_variance':
+        return {
+          mean: tx / 1000000, // Descale
+          variance: fee / 1000000,
+        };
+
+      case 'compute_shielded_ratio':
+        return {
+          shielded_ratio: shield > 0 && tx > 0 ? shield / tx : 0,
+          confidence: 0.99,
+        };
+
+      case 'compute_fee_statistics':
+        return {
+          avg_fee: (fee / tx / 1000000) * 0.0001, // In ZEC
+          std_dev: Math.sqrt(feeSq / tx / 1000000000000) * 0.0001,
+        };
+
+      default:
+        return { status: 'unknown_program', program };
+    }
   }
 }
-
-export default new CoFHEClient();
