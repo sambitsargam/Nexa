@@ -1,4 +1,5 @@
-import { Keypair, SecretVaultBuilderClient } from '@nillion/secretvaults';
+import { Keypair } from '@nillion/nuc';
+import { SecretVaultBuilderClient } from '@nillion/secretvaults';
 import { logger } from '../utils/logger.js';
 
 /**

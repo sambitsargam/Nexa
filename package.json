@@ -27,15 +27,16 @@
   "author": "Sambit Sargam Ekalabya",
   "license": "MIT",
   "dependencies": {
+    "@nillion/blindfold": "^0.1.0",
+    "@nillion/nilai-ts": "^0.2.0",
+    "@nillion/nuc": "^0.1.0",
+    "@nillion/secretvaults": "^0.1.7",
     "axios": "^1.7.7",
-    "express": "^4.21.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "express": "^4.21.1",
     "pino": "^9.4.0",
-    "pino-pretty": "^13.0.0",
-    "@nillion/secretvaults": "^0.1.7",
-    "@nillion/nuc": "^0.1.0",
-    "@nillion/nilai-ts": "^0.2.0"
+    "pino-pretty": "^13.0.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
