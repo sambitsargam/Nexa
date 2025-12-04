@@ -239,8 +239,6 @@ test('Encryption Pipeline: Plaintext → Encrypted → Decrypted', async t => {
     console.log(`Final aggregates match original within tolerance: TRUE`);
     console.log(`Privacy-safe summary generated: "${summary}"`);
   });
-
-  nildb.clear();
 });
 
 test('Service Integration: Storage and Retrieval', async t => {
