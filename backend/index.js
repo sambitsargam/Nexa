@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { NilDBStorage } from './services/nildb-storage.js';
 import { NilAIService } from './services/nilai-service.js';
+import { ZcashIngestor } from './services/ingestion.js';
 import { cofheService } from './services/cofhe-service.js';
 
 // Load environment variables
@@ -28,6 +29,7 @@ const logger = pino(
 // Initialize Nillion services
 const nildbStorage = new NilDBStorage();
 const nilaiService = new NilAIService();
+const ingestor = new ZcashIngestor();
 
 // Initialize app
 const app = express();

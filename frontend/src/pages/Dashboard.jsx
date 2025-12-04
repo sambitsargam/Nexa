@@ -8,6 +8,7 @@ export default function Dashboard({ onBack }) {
   const [mode, setMode] = useState('normal');
   const [normalData, setNormalData] = useState(null);
   const [privacyData, setPrivacyData] = useState(null);
+  const [aiSummary, setAiSummary] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [historicalData, setHistoricalData] = useState([]);
@@ -29,6 +30,17 @@ export default function Dashboard({ onBack }) {
       if (!response.ok) throw new Error('Failed to fetch data');
       const data = await response.json();
       setNormalData(data);
+      
+      // Fetch AI summary
+      try {
+        const summaryResponse = await fetch(`${API_BASE}/summary`);
+        if (summaryResponse.ok) {
+          const summaryData = await summaryResponse.json();
+          setAiSummary(summaryData);
+        }
+      } catch (summaryErr) {
+        console.warn('Could not fetch AI summary:', summaryErr);
+      }
       
       // Generate historical data for charts
       const hist = Array.from({ length: 24 }, (_, i) => ({
@@ -230,6 +242,21 @@ export default function Dashboard({ onBack }) {
             {/* Insights */}
             <div className="insights-section">
               <h3>📊 Key Insights</h3>
+              
+              {/* AI-Generated Summary */}
+              {aiSummary && (
+                <div className="ai-summary-card">
+                  <div className="ai-header">
+                    <span className="ai-badge">🤖 AI-Generated</span>
+                    <h4>Network Summary</h4>
+                  </div>
+                  <p className="ai-summary-text">{aiSummary.summary || aiSummary}</p>
+                  <div className="ai-metadata">
+                    <span className="timestamp">Generated at {new Date().toLocaleTimeString()}</span>
+                  </div>
+                </div>
+              )}
+              
               <div className="insights-grid">
                 <div className="insight-card primary">
                   <div className="insight-icon">🔐</div>
