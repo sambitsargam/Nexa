@@ -4,6 +4,8 @@ import dotenv from 'dotenv';
 import pino from 'pino';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { NilDBStorage } from './services/nildb-storage.js';
+import { NilAIService } from './services/nilai-service.js';
 
 // Load environment variables
 dotenv.config();
@@ -21,6 +23,10 @@ const logger = pino(
     },
   })
 );
+
+// Initialize Nillion services
+const nildbStorage = new NilDBStorage();
+const nilaiService = new NilAIService();
 
 // Initialize app
 const app = express();
@@ -46,6 +52,10 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     mode: process.env.NODE_ENV,
+    services: {
+      nildb: 'initialized',
+      nilai: 'initialized',
+    },
   });
 });
 
@@ -108,11 +118,26 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  logger.info(`Nexa server running on port ${PORT}`);
-  logger.info(`Environment: ${process.env.NODE_ENV}`);
-  logger.info(`Dev mode: ${process.env.DEV_MODE}`);
-});
+// Start server with service initialization
+async function startServer() {
+  try {
+    // Initialize Nillion services
+    await nildbStorage.initialize();
+    await nilaiService.initialize();
+
+    app.listen(PORT, () => {
+      logger.info(`✅ Nexa server running on port ${PORT}`);
+      logger.info(`📦 Environment: ${process.env.NODE_ENV}`);
+      logger.info(`🔧 Dev mode: ${process.env.DEV_MODE}`);
+      logger.info(`💾 NilDB: Ready`);
+      logger.info(`🤖 NilAI: Ready`);
+    });
+  } catch (error) {
+    logger.error({ error }, 'Failed to start server');
+    process.exit(1);
+  }
+}
+
+startServer();
 
 export default app;

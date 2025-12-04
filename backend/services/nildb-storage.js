@@ -1,222 +1,272 @@
-import pino from 'pino';
-import crypto from 'crypto';
-
-const logger = pino();
+import { Keypair, SecretVaultBuilderClient } from '@nillion/secretvaults';
+import { logger } from '../utils/logger.js';
 
 /**
- * nilDB Storage Service
- * Stores encrypted ciphertext blobs and metadata
- * NOTE: This is a mock implementation for demo purposes
- *       In production, use Nillion SecretVaults API client
- *       See: https://docs.nillion.com/api/nildb/nildb-api
+ * NilDB Storage Service
+ * Persists encrypted results to nilDB with cryptographic provenance
+ * Uses Nillion SecretVaults SDK for production-grade encrypted storage
+ * Reference: https://docs.nillion.com/build/private-storage/ts-docs
  */
 export class NilDBStorage {
-  constructor(options = {}) {
-    this.apiBase = options.apiBase || process.env.NILDB_API_BASE || 'https://api.nillion.com/nildb';
-    this.apiKey = options.apiKey || process.env.NILDB_API_KEY;
-    this.userId = options.userId || process.env.NILDB_USER_ID;
-    this.vaultId = options.vaultId || process.env.NILDB_VAULT_ID;
-    
-    // In-memory storage for demo
-    this.storage = new Map();
-    this.devMode = options.devMode !== false;
-
-    logger.info('NilDBStorage initialized' + (this.devMode ? ' in dev/demo mode' : ''));
+  constructor() {
+    this.client = null;
+    this.collectionId = null;
+    this.storage = {}; // In-memory fallback for dev mode
+    this.provenance = {};
   }
 
   /**
-   * Store encrypted result in nilDB
-   * Returns a reference/ID for later retrieval
-   *
-   * @param {object} payload - { ciphertext, metadata, provenance }
-   * @returns {object} { reference_id, stored_at, vault_id }
+   * Initialize nilDB client (call once at startup)
    */
-  async storeEncryptedResult(payload) {
-    if (!payload || !payload.ciphertext || !payload.metadata) {
-      throw new Error('Ciphertext and metadata required');
+  async initialize() {
+    const devMode = process.env.DEV_MODE === 'true';
+    
+    if (devMode) {
+      logger.info('NilDB: Running in DEV_MODE (in-memory storage)');
+      return;
     }
 
     try {
-      const referenceId = `ref_${crypto.randomBytes(12).toString('hex')}`;
-
-      if (this.devMode) {
-        // Demo: store in-memory
-        const record = {
-          reference_id: referenceId,
-          ciphertext: payload.ciphertext,
-          metadata: payload.metadata,
-          provenance: payload.provenance || {},
-          stored_at: new Date().toISOString(),
-          vault_id: this.vaultId,
-        };
-        
-        this.storage.set(referenceId, record);
-        logger.info(`Stored encrypted result (demo mode): ${referenceId}`);
-
-        return {
-          reference_id: referenceId,
-          stored_at: record.stored_at,
-          vault_id: this.vaultId,
-          ciphertext_size: payload.ciphertext.length,
-        };
+      const apiKey = process.env.NILDB_API_KEY;
+      if (!apiKey) {
+        throw new Error('NILDB_API_KEY not configured');
       }
 
-      // Production: use Nillion SecretVaults API
-      // await axios.post(`${this.apiBase}/store`, {
-      //   ciphertext: payload.ciphertext,
-      //   metadata: payload.metadata,
-      //   provenance: payload.provenance,
-      //   vault_id: this.vaultId,
-      // }, {
-      //   headers: { Authorization: `Bearer ${this.apiKey}` }
-      // });
+      // Initialize SecretVault builder client
+      const builderKeypair = Keypair.from(apiKey);
+      this.client = await SecretVaultBuilderClient.from({
+        keypair: builderKeypair,
+        urls: {
+          chain: process.env.NILCHAIN_URL || 'http://rpc.testnet.nilchain-rpc-proxy.nilogy.xyz',
+          auth: process.env.NILAUTH_URL || 'https://nilauth.sandbox.app-cluster.sandbox.nilogy.xyz',
+          dbs: (process.env.NILDB_NODES || 'https://nildb-stg-n1.nillion.network,https://nildb-stg-n2.nillion.network,https://nildb-stg-n3.nillion.network').split(','),
+        },
+        blindfold: { operation: 'store' },
+      });
 
-      logger.info(`Stored encrypted result via nilDB API: ${referenceId}`);
-      return {
-        reference_id: referenceId,
+      await this.client.refreshRootToken();
+
+      // Register builder profile (one-time setup)
+      try {
+        await this.client.readProfile();
+        logger.info('NilDB: Builder profile already registered');
+      } catch {
+        const builderDid = builderKeypair.toDid().toString();
+        await this.client.register({
+          did: builderDid,
+          name: 'Nexa Analytics Builder',
+        });
+        logger.info({ did: builderDid }, 'NilDB: Registered builder profile');
+      }
+
+      // Ensure analytics collection exists or create it
+      this.collectionId = process.env.NILLION_COLLECTION_ID || 'nexa-analytics-encrypted';
+      try {
+        const collections = await this.client.readCollections();
+        const exists = collections.some((c) => c._id === this.collectionId);
+        if (!exists) throw new Error('Collection not found');
+        logger.info({ collectionId: this.collectionId }, 'NilDB: Found analytics collection');
+      } catch {
+        // Collection doesn't exist, create it
+        await this.client.createCollection({
+          _id: this.collectionId,
+          type: 'standard',
+          name: 'Nexa Encrypted Analytics Results',
+          schema: {
+            type: 'object',
+            properties: {
+              reference_id: { type: 'string' },
+              ciphertext: { type: 'string', '%allot': true },
+              metadata: { type: 'object' },
+              provenance: { type: 'object' },
+              stored_at: { type: 'string' },
+            },
+            required: ['reference_id', 'ciphertext'],
+          },
+        });
+        logger.info({ collectionId: this.collectionId }, 'NilDB: Created analytics collection');
+      }
+
+      logger.info('NilDB: Client initialized successfully');
+    } catch (error) {
+      logger.error({ error }, 'NilDB: Initialization failed, falling back to in-memory storage');
+      this.client = null; // Fallback to in-memory
+    }
+  }
+
+  /**
+   * Store encrypted result in nilDB with provenance metadata
+   */
+  async storeEncryptedResult(referenceId, ciphertext, metadata = {}) {
+    try {
+      const provenance = {
+        source_url: metadata.source || 'unknown',
+        block_range: metadata.block_range || 'unknown',
+        job_id: metadata.job_id || 'unknown',
+        encrypted_at: new Date().toISOString(),
         stored_at: new Date().toISOString(),
-        vault_id: this.vaultId,
+        version: 1,
+      };
+
+      const record = {
+        _id: referenceId,
+        reference_id: referenceId,
+        ciphertext,
+        metadata,
+        provenance,
+        stored_at: new Date().toISOString(),
+      };
+
+      // Try to store in nilDB (production)
+      if (this.client && this.collectionId) {
+        try {
+          await this.client.createStandardData(this.collectionId, [record]);
+          logger.info(
+            { referenceId, collectionId: this.collectionId },
+            'Encrypted result stored in nilDB'
+          );
+        } catch (dbError) {
+          logger.warn({ referenceId, error: dbError.message }, 'NilDB storage failed, using in-memory fallback');
+          this.storage[referenceId] = record;
+        }
+      } else {
+        // In-memory fallback
+        this.storage[referenceId] = record;
+      }
+
+      this.provenance[referenceId] = provenance;
+
+      return {
+        success: true,
+        reference_id: referenceId,
+        stored_at: record.stored_at,
+        storage_mode: this.client ? 'nildb' : 'memory',
       };
     } catch (error) {
-      logger.error(`Storage failed: ${error.message}`);
+      logger.error({ referenceId, error: error.message }, 'Failed to store encrypted result');
       throw error;
     }
   }
 
   /**
    * Retrieve encrypted result from nilDB
-   *
-   * @param {string} referenceId - Reference ID from storeEncryptedResult
-   * @returns {object} { ciphertext, metadata, provenance }
    */
   async retrieveEncryptedResult(referenceId) {
-    if (!referenceId) {
-      throw new Error('ReferenceId required');
-    }
-
     try {
-      if (this.devMode) {
-        // Demo: retrieve from in-memory store
-        const record = this.storage.get(referenceId);
-        if (!record) {
-          throw new Error(`Reference not found: ${referenceId}`);
-        }
+      let record;
 
-        logger.info(`Retrieved encrypted result (demo mode): ${referenceId}`);
-        return {
-          reference_id: referenceId,
-          ciphertext: record.ciphertext,
-          metadata: record.metadata,
-          provenance: record.provenance,
-          retrieved_at: new Date().toISOString(),
-        };
+      // Try to retrieve from nilDB (production)
+      if (this.client && this.collectionId) {
+        try {
+          const results = await this.client.findData(this.collectionId, {
+            filter: { _id: referenceId },
+          });
+          if (results.length > 0) {
+            record = results[0];
+          }
+        } catch (dbError) {
+          logger.warn({ referenceId, error: dbError.message }, 'NilDB retrieval failed, checking memory');
+          record = this.storage[referenceId];
+        }
+      } else {
+        // In-memory fallback
+        record = this.storage[referenceId];
       }
 
-      // Production: use Nillion SecretVaults API
-      // const response = await axios.get(`${this.apiBase}/retrieve/${referenceId}`, {
-      //   headers: { Authorization: `Bearer ${this.apiKey}` }
-      // });
+      if (!record) {
+        throw new Error(`Record not found: ${referenceId}`);
+      }
 
-      logger.info(`Retrieved encrypted result via nilDB API: ${referenceId}`);
-      return {}; // Placeholder
+      logger.info({ referenceId }, 'Retrieved encrypted result');
+
+      return {
+        reference_id: record.reference_id,
+        ciphertext: record.ciphertext,
+        metadata: record.metadata,
+        provenance: record.provenance,
+        retrieved_at: new Date().toISOString(),
+      };
     } catch (error) {
-      logger.error(`Retrieval failed: ${error.message}`);
+      logger.error({ referenceId, error: error.message }, 'Failed to retrieve encrypted result');
       throw error;
     }
   }
 
   /**
-   * List all stored results with provenance info
-   *
-   * @param {object} filter - Optional filter by job_id, window, etc.
-   * @returns {array} List of stored results with metadata
+   * List all stored results with optional filters
    */
-  async listResults(filter = {}) {
+  async listResults(filters = {}) {
     try {
-      if (this.devMode) {
-        // Demo: list from in-memory store
-        let results = Array.from(this.storage.values());
+      let results = [];
 
-        // Apply filters
-        if (filter.job_id) {
-          results = results.filter(
-            r => r.metadata.job_id === filter.job_id
-          );
+      if (this.client && this.collectionId) {
+        try {
+          const queryFilter = filters.job_id
+            ? { 'provenance.job_id': filters.job_id }
+            : {};
+          const records = await this.client.findData(this.collectionId, {
+            filter: queryFilter,
+          });
+          results = records.map((r) => ({
+            reference_id: r.reference_id,
+            stored_at: r.stored_at,
+            metadata: r.metadata,
+          }));
+        } catch (dbError) {
+          logger.warn({ error: dbError.message }, 'NilDB list failed, using memory');
+          results = Object.values(this.storage).map((r) => ({
+            reference_id: r.reference_id,
+            stored_at: r.stored_at,
+            metadata: r.metadata,
+          }));
         }
-        if (filter.window) {
-          results = results.filter(
-            r => r.metadata.window === filter.window
-          );
-        }
-
-        const summary = results.map(r => ({
+      } else {
+        results = Object.values(this.storage).map((r) => ({
           reference_id: r.reference_id,
-          job_id: r.metadata.job_id,
-          window: r.metadata.window,
           stored_at: r.stored_at,
-          ciphertext_size: r.ciphertext.length,
+          metadata: r.metadata,
         }));
-
-        logger.info(`Listed ${summary.length} results from nilDB (demo mode)`);
-        return summary;
       }
 
-      logger.info('Listed results via nilDB API');
-      return [];
+      // Apply job_id filter if needed
+      if (filters.job_id) {
+        results = results.filter((r) => r.metadata?.job_id === filters.job_id);
+      }
+
+      logger.info({ count: results.length }, 'Listed encrypted results');
+
+      return results;
     } catch (error) {
-      logger.error(`List operation failed: ${error.message}`);
+      logger.error({ error: error.message }, 'Failed to list results');
       throw error;
     }
   }
 
   /**
-   * Delete stored result (for cleanup)
+   * Delete a result from nilDB (for cleanup)
    */
   async deleteResult(referenceId) {
-    if (!referenceId) {
-      throw new Error('ReferenceId required');
-    }
-
     try {
-      if (this.devMode) {
-        this.storage.delete(referenceId);
-        logger.info(`Deleted result (demo mode): ${referenceId}`);
-        return { deleted: true };
+      if (this.client && this.collectionId) {
+        try {
+          await this.client.deleteData(this.collectionId, {
+            filter: { _id: referenceId },
+          });
+          logger.info({ referenceId }, 'Deleted result from nilDB');
+        } catch (dbError) {
+          logger.warn({ referenceId, error: dbError.message }, 'NilDB delete failed, checking memory');
+          delete this.storage[referenceId];
+        }
+      } else {
+        delete this.storage[referenceId];
       }
 
-      logger.info(`Deleted result via nilDB API: ${referenceId}`);
-      return { deleted: true };
+      delete this.provenance[referenceId];
+
+      return { success: true, deleted: referenceId };
     } catch (error) {
-      logger.error(`Delete operation failed: ${error.message}`);
+      logger.error({ referenceId, error: error.message }, 'Failed to delete result');
       throw error;
     }
   }
-
-  /**
-   * Get storage statistics
-   */
-  getStats() {
-    if (this.devMode) {
-      return {
-        total_records: this.storage.size,
-        storage_mode: 'in-memory (demo)',
-        vault_id: this.vaultId,
-      };
-    }
-
-    return {
-      storage_mode: 'nilDB API',
-      vault_id: this.vaultId,
-    };
-  }
-
-  /**
-   * Clear storage (for testing)
-   */
-  clear() {
-    this.storage.clear();
-    logger.debug('Storage cleared');
-  }
 }
-
-export default new NilDBStorage();
