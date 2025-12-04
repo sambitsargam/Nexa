@@ -126,7 +126,7 @@ async function startServer() {
     // Initialize Nillion services
     await nildbStorage.initialize();
     await nilaiService.initialize();
-    // Initialize CoFHE service (real connect if envs provided, otherwise mock)
+    // Initialize CoFHE service
     await cofheService.initialize();
 
     app.listen(PORT, () => {

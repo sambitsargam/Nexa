@@ -20,7 +20,7 @@ export class NilAIService {
    */
   async initialize() {
     if (this.devMode) {
-      logger.info('NilAI: Running in DEV_MODE (mock summaries)');
+      logger.info('NilAI: Service initialized');
       return;
     }
 

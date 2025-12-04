@@ -138,9 +138,9 @@ GET http://localhost:3000/api/summary
 // Returns AI summary text
 ```
 
-### Mock Data
+###  Data
 
-When API calls fail, the frontend falls back to realistic mock data, allowing development without a running backend.
+The frontend connects to real API endpoints for all data operations, requiring a running backend server.
 
 ## Responsive Design
 

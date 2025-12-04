@@ -1,5 +1,4 @@
-import hre from "hardhat";
-const { ethers } = hre;
+import { ethers } from "hardhat";
 import fs from "fs";
 import path from "path";
 

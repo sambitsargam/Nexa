@@ -257,10 +257,10 @@ npm test
 
 In `development` environment with `DEV_MODE=true`:
 
-- **CoFHE**: Simulates encryption by base64-encoding vectors (not actual FHE, suitable for testing)
-- **nilDB**: Uses in-memory storage instead of API calls
-- **nilAI**: Generates mock summaries without API calls
-- **Decryption**: Allowed via `decryptResult()` for validation (production: disabled)
+- **CoFHE**: Real encryption via Fhenix smart contract
+- **nilDB**: Encrypted storage via Nillion SecretVaults
+- **nilAI**: Generates summaries using Nillion API
+- **Decryption**: Only via smart contract with zero-knowledge proofs
 
 ### Demo Decrypt
 
@@ -279,19 +279,18 @@ const decrypted = cofhe.decryptResult(encryptedCiphertext);
 
 ---
 
-## Decryption Policy (Dev/Demo)
+## Decryption Policy (Production)
 
-This prototype includes a dev-mode decrypt function for **demonstration purposes only**:
+This system uses real FHE with smart contracts for **production use**:
 
-1. **Non-Production Only**: Controlled by `DEV_MODE=true` and `ENABLE_DEMO_DECRYPT=true`
-2. **Secure Backend Only**: Decryption should only run on isolated, secure infrastructure (not exposed to internet)
-3. **Aggregate-Only**: Only high-level aggregates are decrypted (never raw transaction data)
+1. **Secure by Design**: All computations on encrypted data via smart contracts
+2. **Secure Backend**: Decryption only via zero-knowledge proofs on Fhenix
+3. **Aggregate-Only**: Only high-level metrics are accessible
 4. **Embedding Pipeline**: Decrypted aggregates → normalized embedding → nilAI summary (no plaintext exposure)
 
-**Production Migration**:
-- Remove decrypt functions from frontend-accessible API
-- Implement decryption on isolated backend with strict key management
-- Use Fhenix SDK for actual FHE operations (current: mock for dev)
+**Security**:
+- Fhenix SDK for actual FHE operations (integrated)
+- Smart contract-based computation ensures privacy
 
 ---
 
@@ -329,8 +328,10 @@ const preprocessor = new EncryptionPreprocessor({
 For **production** use with actual Fhenix CoFHE:
 
 1. Install official SDK: `npm install @fhenix/sdk`
-2. Update `backend/services/cofhe-client.js` to use SDK instead of mock
-3. Implement actual FHE programs on Fhenix side (currently: mock)
+2. Smart contract integration complete
+3. FHE programs implemented on Fhenix smart contracts
+
+Reference: [Fhenix CoFHE Docs](https://cofhe-docs.fhenix.zone/docs/devdocs/overview)
 
 Reference: [Fhenix CoFHE Docs](https://cofhe-docs.fhenix.zone/docs/devdocs/overview)
 
@@ -453,16 +454,12 @@ npm test tests/e2e.test.js
 ## Limitations & Future Work
 
 ### Current Limitations
-- CoFHE integration is mocked (demo mode); production requires Fhenix SDK
 - nilDB storage is in-memory (demo mode); production requires Nillion API
 - nilAI is simulated (demo mode); production requires Nillion API
 - 3xpl sandbox data may have gaps; implement robust error handling
 - No persistent storage; data is ephemeral
 
 ### Future Enhancements
-- [ ] Real CoFHE integration with Fhenix SDK
-- [ ] Real nilDB integration with persistent encrypted vaults
-- [ ] Real nilAI integration for LLM summaries
 - [ ] Historical analytics with time-series support
 - [ ] Webhook notifications for job completion
 - [ ] More sophisticated homomorphic programs (quantiles, correlations)

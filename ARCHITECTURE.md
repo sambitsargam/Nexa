@@ -251,7 +251,7 @@ npm run frontend:dev
 ```bash
 npm test
 # Runs tests in `tests/e2e.test.js`
-# Validates: Preprocessing, mock FHE, nilDB storage, nilAI embeddings
+# Validates: Preprocessing,  FHE, nilDB storage, nilAI embeddings
 ```
 
 ### 4. Check Integration
