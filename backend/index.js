@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { NilDBStorage } from './services/nildb-storage.js';
 import { NilAIService } from './services/nilai-service.js';
+import { cofheService } from './services/cofhe-service.js';
 
 // Load environment variables
 dotenv.config();
@@ -55,6 +56,7 @@ app.get('/api/health', (req, res) => {
     services: {
       nildb: 'initialized',
       nilai: 'initialized',
+      cofhe: cofheService && cofheService.initialized ? (cofheService.isRealClient() ? 'real' : 'mock') : 'uninitialized',
     },
   });
 });
@@ -124,6 +126,8 @@ async function startServer() {
     // Initialize Nillion services
     await nildbStorage.initialize();
     await nilaiService.initialize();
+    // Initialize CoFHE service (real connect if envs provided, otherwise mock)
+    await cofheService.initialize();
 
     app.listen(PORT, () => {
       logger.info(`✅ Nexa server running on port ${PORT}`);
