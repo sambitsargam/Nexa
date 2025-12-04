@@ -56,7 +56,7 @@ app.get('/api/health', (req, res) => {
     services: {
       nildb: 'initialized',
       nilai: 'initialized',
-      cofhe: cofheService && cofheService.initialized ? (cofheService.isRealClient() ? 'real' : 'mock') : 'uninitialized',
+      cofhe: cofheService && cofheService.isInitialized() ? 'connected' : 'uninitialized',
     },
   });
 });

@@ -84,7 +84,7 @@ Zcash 3xpl API → Ingestor → Preprocessor → Frontend
    - Submits encrypted ciphertext to backend `/api/privacy/aggregates`
 
 3. Backend (receives encrypted blob):
-   - `CofheService.getClient()` returns initialized SDK client (real or mock)
+   - `CofheService.getSigner()` returns initialized signer for smart contract interaction
    - Stores encrypted blob via `NilDBStorage.storeEncryptedResult()`
    - Generates embedding via `NilAIService.createEmbedding()` on plaintext metadata
    - Returns encrypted result + embedding to frontend
@@ -107,19 +107,23 @@ Zcash 3xpl API → Ingestor → Preprocessor → Frontend
 - **Note**: Scales floats to integers (e.g., 1250 tx → 1250000000 in 1e6 precision)
 
 ### CofheService (`backend/services/cofhe-service.js`)
-- **Role**: Initialize and manage CoFHE SDK client (real or mock)
-- **Modes**:
-  - **Real**: Connects to `@cofhe/sdk` + viem when `COFHE_PRIVATE_KEY` + `COFHE_RPC_URL` provided
-  - **Mock**: Falls back to `CoFHEClient` (dev/demo simulation)
-- **Dev Only**: Server-side encryption is not canonical; use client-side Cofhejs in production
+- **Role**: Initialize and manage real CoFHE SDK with smart contract integration
+- **Features**:
+  - Connects to Fhenix testnet via `COFHE_PRIVATE_KEY` + `COFHE_RPC_URL`
+  - Submits encrypted aggregates to NexaAnalytics smart contract
+  - Executes homomorphic computations on-chain
+  - Retrieves encrypted results with proofs
+- **Production Ready**: Real FHE operations via deployed smart contract on Fhenix
 
-### CoFHEClient (`backend/services/cofhe-client.js`)
-- **Role**: Mock FHE operations for development/demo mode
+### NexaAnalytics Smart Contract (`contracts/NexaAnalytics.sol`)
+- **Role**: Execute homomorphic encryption computations on encrypted data
 - **Functions**:
-  - `encryptVector()`: Simulate encryption (JSON→hex)
-  - `submitJob()`: Simulate computation submission
-  - `decryptResult()`: Simulate decryption (hex→JSON)
-- **Status**: This is a **mock only**; real FHE requires smart contracts
+  - `submitAggregate()`: Receive encrypted metrics from backend
+  - `computeShieldedRatio()`: Compute privacy metrics on encrypted data
+  - `getEncryptedResult()`: Return encrypted results with proofs
+  - `verifyProof()`: Verify zk-SNARK proof of computation
+  - `batchSubmitAggregates()`: Submit multiple aggregates in one transaction
+- **Status**: Real FHE operations via Fhenix smart contract
 
 ### NilDBStorage (`backend/services/nildb-storage.js`)
 - **Role**: Persist encrypted results to Nillion nilDB (Secret Vaults)
@@ -166,8 +170,8 @@ NILAI_API_BASE=https://nilai-a779.nillion.network/v1  # LLM endpoint
 PORT=3000
 NODE_ENV=development
 LOG_LEVEL=debug
-DEV_MODE=true  # Enable mock services
-ENABLE_DEMO_DECRYPT=true  # Allow decryption in dev (never in production!)
+DEV_MODE=false  # Production mode
+ENABLE_DEMO_DECRYPT=false  # Decryption disabled in production
 ```
 
 ## API Endpoints
@@ -181,7 +185,7 @@ Returns service health status
   "services": {
     "nildb": "initialized",
     "nilai": "initialized",
-    "cofhe": "real" | "mock" | "uninitialized"
+    "cofhe": "connected" | "uninitialized"
   }
 }
 ```
@@ -232,7 +236,7 @@ Returns privacy-safe summary
 ### 1. Start Backend
 ```bash
 npm run backend:dev
-# Initializes: Nillion nilDB, nilAI, CoFHE service (real or mock)
+# Initializes: Nillion nilDB, nilAI, CoFHE service (real Fhenix connection)
 # Listens on http://localhost:3000
 ```
 
@@ -258,17 +262,18 @@ curl http://localhost:3000/api/health
 
 ## Production Considerations
 
-### Client-Side Encryption (Recommended)
-- Use **Cofhejs** (client-side library) from `@cofhe/sdk`
-- Encrypt sensitive data in browser before sending to backend
-- Backend remains agnostic to FHE operations
-- Smart contracts handle encrypted computation (Fhenix testnet/mainnet)
+### Smart Contract FHE (Implemented)
+- **NexaAnalytics** contract deployed on Fhenix testnet
+- Backend orchestrates encrypted computation via contract calls
+- Real homomorphic encryption on encrypted data
+- Zero-knowledge proofs verify computation integrity
+- Results returned encrypted from contract
 
-### Server-Side FHE (Not Recommended)
-- Possible but requires deployed Fhenix smart contract
-- Backend would orchestrate contract calls + result unsealing
-- Higher latency due to blockchain round-trips
-- Not implemented here; use official Fhenix examples for reference
+### Client-Side Support
+- Frontend can use Cofhejs for additional encryption layers
+- Optional client-side encryption before sending to backend
+- Backend smart contract handles core FHE operations
+- End-to-end encryption for sensitive workflows
 
 ### Data Persistence
 - **Encrypted results**: Stored in Nillion nilDB (Secret Vaults)
@@ -276,10 +281,11 @@ curl http://localhost:3000/api/health
 - **Audit trail**: Provenance tracked (source, timestamp, block range)
 
 ### Security & Privacy
-- **Never** decrypt in production (mock only for dev)
-- **Always** use Cofhejs permits for smart contract result unsealing
-- **Rotate** API keys regularly (NILDB_API_KEY, NILAI_API_KEY)
-- **Audit** access logs for encryption/decryption operations
+- **Always** use smart contract for encrypted computations
+- **Verify** zk-SNARK proofs from contract results
+- **Rotate** API keys regularly (NILDB_API_KEY, NILAI_API_KEY, COFHE_PRIVATE_KEY)
+- **Audit** smart contract interactions and transaction logs
+- **Never** expose plaintext private keys
 
 ## References
 
